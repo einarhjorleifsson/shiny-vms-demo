@@ -11,6 +11,17 @@ runtime: shiny
 library(tidyverse)
 library(mar)
 library(lubridate)
+library(gisland)
+attach("/net/hafkaldi/export/home/haf/einarhj/prj2/vms2/data/shapes.rda")
+harbours <- fortify(harbours.sp)
+x <- data_frame(group = unique(harbours$group)) %>% 
+  mutate(id = 1:n())
+harbours <- 
+  harbours %>% select(-id) %>% 
+  left_join(x) %>% 
+  as.data.frame() %>% 
+  df_2_spdf(col.names = c("long", "lat", "group", "id"))
+
 con <- connect_mar()
 VID <-
   afli_stofn(con) %>% 
@@ -20,35 +31,24 @@ VID <-
   pull(skipnr) %>% 
   unique()
 VID <- as.character(VID)
-
-
-VMS <-
-    tbl_mar(con, "stk.stk_vms_v") %>% 
-    mutate(year = to_number(to_char(posdate, 'YYYY')),
-           lon = poslon * 45 / atan(1),
-           lat = poslat * 45 / atan(1),
-           heading = heading * 45 / atan(1),
-           speed = speed * 1.852) %>%
-    filter(year %in% c(2014:2017),
-           between(lon, -27, -21),
-           between(lat, 65.5, 67.25),
-           skip_nr %in% VID) %>%
-    select(year, mobileid, vid = skip_nr, date = posdate, lon, lat, speed, heading, in_out_of_harbor, harborid) %>%
-    collect(n = Inf)
-vms <- read_rds("data2/vms.rda")
-library(gisland)
-attach("/net/hafkaldi/export/home/haf/einarhj/prj2/vms2/data/shapes.rda")
-harbours <- fortify(harbours.sp)
-x <- data_frame(group = unique(harbours$group)) %>% 
-  mutate(id = 1:n())
-harbours <- left_join(harbours %>% select(-id), x)
-x2 <- df_2_spdf(as.data.frame(harbours), col.names = c("long", "lat", "group", "id"))
-vms <-
-  vms %>% 
-  mutate(p.harbour = gisland::geo_inside(lon, lat, x2, "ID"),
+tbl_mar(con, "stk.stk_vms_v") %>% 
+  mutate(year = to_number(to_char(posdate, 'YYYY')),
+         lon = poslon * 45 / atan(1),
+         lat = poslat * 45 / atan(1),
+         heading = heading * 45 / atan(1),
+         speed = speed * 1.852) %>%
+  filter(year %in% c(2014:2017),
+         between(lon, -28, -18),
+         between(lat, 65.5, 67.5),
+         skip_nr %in% VID) %>%
+  select(year, mobileid, vid = skip_nr, date = posdate, lon, lat,
+         speed, heading, in_out_of_harbor, harborid) %>%
+  collect(n = Inf) %>% 
+  mutate(p.harbour = gisland::geo_inside(lon, lat, harbours, "ID"),
          vid = as.integer(vid),
-         year = month(date))
-write_rds(vms, path = "data2/vms.rda")
+         month = month(date)) %>% 
+  filter(is.na(p.harbour)) %>% 
+  write_rds(path = "data2/vms.rda")
 ```
 
 
@@ -60,12 +60,11 @@ library(leaflet)
 library(raster)
 vms <-
   read_rds("data2/vms.rda") %>% 
-  filter(speed <= 15,
-         is.na(p.harbour))
+  filter(speed <= 15)
 
 speed <-
   vms %>%  
-  mutate(speed = as.integer(round(speed))) %>% 
+  mutate(speed = round(speed)) %>% 
   group_by(speed) %>% 
   count()
 
@@ -88,8 +87,10 @@ sidebarPanel(sliderInput(inputId = "Range",
                          step = 1,
                          value = c(2, 14)),
              width = 30)
-numericInput(inputId = "Grade", label = "Grade", value = 0.1, min = 0.01, max = 0.5, step = 0.01,
-  width = NULL)
+#numericInput(inputId = "Grade", label = "Grade", value = 0.1, min = 0.001, max = 0.5, step = 0.001,
+#  width = NULL)
+radioButtons(inputId = "Grade", label = "Choose decimal degrees",
+             choices = c(0.0025, 0.005, 0.01, 0.05, 0.1, 0.5), selected = 0.1)
 #selectInput(inputId = "Grade", label = "Grade:",
 #            choices = seq(0.01, 0.1, by = 0.01), selected = 0.10)
 ```
@@ -120,8 +121,8 @@ renderPlot({
 renderPlot({
   vms %>% 
     filter(speed >= min(input$Range) & speed <= max(input$Range)) %>% 
-    mutate(lon = grade(lon, dx = input$Grade),
-           lat = grade(lat, dx = input$Grade/2)) %>% 
+    mutate(lon = grade(lon, dx = as.numeric(input$Grade)),
+           lat = grade(lat, dx = as.numeric(input$Grade)/2)) %>% 
     group_by(lon, lat) %>% 
     summarise(no.pings = n()) %>% 
     ungroup() %>% 
@@ -130,7 +131,8 @@ renderPlot({
     geom_raster(aes(lon, lat, fill = no.pings)) +
     geom_polygon(data = geo::island, aes(lon, lat), fill = "grey") +
     scale_fill_viridis(option = "B", trans = "reverse") +
-    coord_quickmap(xlim = range(vms$lon), ylim = range(vms$lat))
+    coord_quickmap(xlim = range(vms$lon), ylim = range(vms$lat)) +
+    labs(x = NULL, y = NULL)
 })
 ```
 
@@ -143,14 +145,17 @@ Column
 renderPlot({
   vms %>% 
     filter(speed >= min(input$Range) & speed <= max(input$Range)) %>% 
-    mutate(lon = grade(lon, dx = input$Grade),
-           lat = grade(lat, dx = input$Grade/2)) %>% 
-    group_by(year) %>% 
+    mutate(lon = grade(lon, dx = as.numeric(input$Grade)),
+           lat = grade(lat, dx = as.numeric(input$Grade)/2)) %>% 
+    group_by(year, month) %>% 
     summarise(effort = n()) %>% 
-    ggplot(aes(year, effort)) +
+    ggplot(aes(month, effort, colour = factor(year))) +
+    scale_color_brewer(palette = "Set1") +
     geom_point() +
     geom_line() +
-    expand_limits(y = 0)
+    expand_limits(y = 0) +
+    scale_x_continuous(breaks = 1:12) +
+    labs(colour = "Year")
 })
 ```
 
@@ -160,12 +165,15 @@ renderPlot({
 renderPlot({
   vms %>% 
     filter(speed >= min(input$Range) & speed <= max(input$Range)) %>% 
-    group_by(year) %>% 
+    group_by(year, month) %>% 
     summarise(vid = n_distinct(vid)) %>% 
-    ggplot(aes(year, vid)) +
+    ggplot(aes(month, vid, colour = factor(year))) +
+    scale_colour_brewer(palette = "Set1") +
     geom_point() +
     geom_line() +
-    expand_limits(y = 0)
+    expand_limits(y = 0) +
+    scale_x_continuous(breaks = 1:12) +
+    labs(colour = "Year")
 })
 ```
 
@@ -179,8 +187,8 @@ renderLeaflet({
   vmsr <- 
     vms %>% 
     filter(speed >= min(input$Range) & speed <= max(input$Range)) %>% 
-    mutate(lon = grade(lon, dx = input$Grade),
-           lat = grade(lat, dx = input$Grade/2)) %>% 
+    mutate(lon = grade(lon, dx = as.numeric(input$Grade)),
+           lat = grade(lat, dx = as.numeric(input$Grade)/2)) %>% 
     group_by(lon, lat) %>% 
     summarise(no.pings = n()) %>% 
     ungroup() %>% 
