@@ -22,6 +22,7 @@ harbours <-
   as.data.frame() %>% 
   df_2_spdf(col.names = c("long", "lat", "group", "id"))
 
+
 con <- connect_mar()
 VID <-
   afli_stofn(con) %>% 
@@ -58,22 +59,27 @@ library(lubridate)
 library(viridis)
 library(leaflet)
 library(raster)
-vms <-
-  read_rds("data2/vms.rda") %>% 
-  filter(speed <= 15)
-
-speed <-
-  vms %>%  
-  mutate(speed = round(speed)) %>% 
-  group_by(speed) %>% 
-  count()
-
 grade <- function(x, dx) {
   brks <- seq(floor(min(x)), ceiling(max(x)),dx)
   ints <- findInterval(x, brks, all.inside = TRUE)
   x <- (brks[ints] + brks[ints + 1]) / 2
   return(x)
 }
+
+vms <-
+  read_rds("data2/vms.rda") %>% 
+  filter(speed <= 15)
+
+speed <-
+  vms %>%  
+  mutate(speed = grade(speed, 0.5)) %>% 
+  group_by(speed) %>% 
+  count()
+
+
+
+attach("/net/hafkaldi/export/home/haf/einarhj/prj2/vms2/data/shapes.rda")
+regl2 <- regl[regl$year == 2008 & regl$nr == 752 | regl$heiti == "Sporðagrunn",]
 ```
 
 Sidebar {.sidebar data-width=175}
@@ -81,10 +87,10 @@ Sidebar {.sidebar data-width=175}
 
 ```{r}
 sidebarPanel(sliderInput(inputId = "Range",
-                         label = "Select Range",
+                         label = "Select speed range",
                          min = 0, 
                          max = 15, 
-                         step = 1,
+                         step = 0.5,
                          value = c(2, 14)),
              width = 30)
 #numericInput(inputId = "Grade", label = "Grade", value = 0.1, min = 0.001, max = 0.5, step = 0.001,
@@ -115,7 +121,7 @@ renderPlot({
 })
 ```
 
-### Grid
+### Static image
 
 ```{r}
 renderPlot({
@@ -139,7 +145,7 @@ renderPlot({
 Column 
 -------------------------------------
 
-### Effort
+### Number of pings
 
 ```{r}
 renderPlot({
@@ -177,13 +183,18 @@ renderPlot({
 })
 ```
 
-Panel 2
+Leaflet
 ===================================== 
 
-### Some stuff
+### Number of pings
 
 ```{r}
 renderLeaflet({
+  
+  sjk300 <- "http://www.hafro.is/~einarhj/tiles/S300/{z}/{x}/{y}.png"
+  sjk200 <- "http://www.hafro.is/~einarhj/tiles/IS_25_26/{z}/{x}/{y}.png"
+
+
   vmsr <- 
     vms %>% 
     filter(speed >= min(input$Range) & speed <= max(input$Range)) %>% 
@@ -198,9 +209,17 @@ renderLeaflet({
   #pal <- colorNumeric(c("#0C2C84", "#41B6C4", "#FFFFCC"), values(vmsr), na.color = "transparent")
   pal <- colorNumeric(inf, values(vmsr), na.color = "transparent")
   leaflet() %>% 
-    addTiles() %>%
-    addRasterImage(vmsr, colors = pal, opacity = 0.8) %>% 
+    addTiles(urlTemplate = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+             group = "Image",
+             attribution = 'Data source: <a href="https://www.hafogvatn.is">Marine Rearch Institute</a>') %>% 
+    addTiles(urlTemplate = sjk200, group = "Chart", options = tileOptions(minZoom = 4, maxZoom = 11, tms = TRUE)) %>%
+    addTiles(group = "OSM") %>% 
+    addPolygons(data = regl2, group = "Closures", opacity = 0.2, color = "red") %>% 
+    addRasterImage(vmsr, colors = pal, opacity = 0.8, group = "VMS") %>% 
     addLegend(pal = pal, values = values(vmsr),
-    title = "Number of pings")
+              title = "Number of pings") %>% 
+    addLayersControl(baseGroups = c("Image", "Chart", "OSM"),
+                     overlayGroups = c("VMS", "Closures"),
+                     options = layersControlOptions(collapsed = FALSE))
 })
 ```
