@@ -116,6 +116,7 @@ renderPlot({
   speed %>% 
     mutate(ok = if_else(speed >= min(input$Range) & speed <= max(input$Range), TRUE, FALSE)) %>% 
     ggplot(aes(speed, n, fill = ok)) +
+    theme_grey(base_size = 18) +
     geom_col() +
     scale_fill_brewer(palette = "Set1")
 })
@@ -156,9 +157,10 @@ renderPlot({
     group_by(year, month) %>% 
     summarise(effort = n()) %>% 
     ggplot(aes(month, effort, colour = factor(year))) +
+    theme_grey(base_size = 18) +
     scale_color_brewer(palette = "Set1") +
     geom_point() +
-    geom_line() +
+    geom_line(lwd = 1) +
     expand_limits(y = 0) +
     scale_x_continuous(breaks = 1:12) +
     labs(colour = "Year")
@@ -174,9 +176,10 @@ renderPlot({
     group_by(year, month) %>% 
     summarise(vid = n_distinct(vid)) %>% 
     ggplot(aes(month, vid, colour = factor(year))) +
+    theme_grey(base_size = 18) +
     scale_colour_brewer(palette = "Set1") +
     geom_point() +
-    geom_line() +
+    geom_line(lwd = 1) +
     expand_limits(y = 0) +
     scale_x_continuous(breaks = 1:12) +
     labs(colour = "Year")
